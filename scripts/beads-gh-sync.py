@@ -81,16 +81,47 @@ def ensure_label(repo, name, color, desc, dry):
     )
 
 
-def issue_body(bead):
+def ref_link(ref, repo):
+    """'owner/repo#n' -> '#n' if same repo (GitHub auto-links), else 'owner/repo#n'."""
+    if not ref or "#" not in ref:
+        return None
+    r, _, n = ref.partition("#")
+    return f"#{n}" if r == repo else f"{r}#{n}"
+
+
+def build_related(bead, endpoint, id2ref, repo):
+    """A markdown 'Related' block linking parent / blocked-by / blocks / sub-tasks
+    to their mirrored issues (#n), falling back to the bead id when unmirrored.
+    Empty unless the bead actually has relationships (cheap: gated on counts)."""
+    if (bead.get("dependency_count") or 0) + (bead.get("dependent_count") or 0) == 0:
+        return ""
+    out, _ = beads_exec(endpoint, ["show", bead["id"], "--json"])
+    try:
+        full = json.loads(out)
+        full = full[0] if isinstance(full, list) else full
+    except json.JSONDecodeError:
+        return ""
+
+    def refs(items, dtype):
+        return [ref_link(id2ref.get(d.get("id")), repo) or f"`{d.get('id')}`"
+                for d in (items or []) if d.get("dependency_type") == dtype]
+
+    deps, depnts = full.get("dependencies") or [], full.get("dependents") or []
+    rows = [
+        ("Parent", refs(deps, "parent-child")),
+        ("Blocked by", refs(deps, "blocks")),
+        ("Blocks", refs(depnts, "blocks")),
+        ("Sub-tasks", refs(depnts, "parent-child")),
+    ]
+    lines = [f"- {label}: {', '.join(v)}" for label, v in rows if v]
+    return "\n\n**Related**\n" + "\n".join(lines) if lines else ""
+
+
+def issue_body(bead, related=""):
     desc = (bead.get("description") or "").rstrip()
     bid = bead["id"]
-    deps = bead.get("dependencies") or bead.get("deps") or []
-    dep_line = ""
-    if isinstance(deps, list) and deps:
-        ids = [d.get("id", d) if isinstance(d, dict) else d for d in deps]
-        dep_line = "\nDepends on: " + ", ".join(str(i) for i in ids)
     footer = f"\n\n---\n*Tracked in beads as `{bid}` — edit there, not here.*\n<!-- beads-id: {bid} -->"
-    return f"{desc}{dep_line}{footer}"
+    return f"{desc}{related}{footer}"
 
 
 def desired_state(bead):
@@ -130,6 +161,9 @@ def main():
     ensure_label(repo, BEADS_LABEL, "1f883d", "Mirrored from a beads issue", args.dry_run)
 
     beads = fetch_beads(endpoint)
+    # bead id -> its mirrored issue ref, for cross-linking related issues.
+    id2ref = {b["id"]: (b.get("external_ref") or "").strip()
+              for b in beads if (b.get("external_ref") or "").strip()}
     print(f"{args.project}: {len(beads)} bead(s) labeled '{BEADS_OPT_IN_LABEL}' -> {repo}"
           + (" [dry-run]" if args.dry_run else ""))
 
@@ -138,7 +172,7 @@ def main():
         bid = b["id"]
         ref = (b.get("external_ref") or "").strip()
         want_title = b.get("title") or bid
-        want_body = issue_body(b)
+        want_body = issue_body(b, build_related(b, endpoint, id2ref, repo))
         want_state = desired_state(b)
         prefix = f"  {bid}"
 
