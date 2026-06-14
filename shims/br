@@ -10,10 +10,13 @@
 # Bypass routing (use the local DB directly): export BEADS_NO_SHIM=1, or pass an
 # explicit --db, or run outside a centralized repo.
 #
-# Caveat: subcommands with cwd-relative file side effects (e.g. `agents --add`
-# writing AGENTS.md, `init`) run in the SERVER's cwd when routed. The common
-# data verbs (ready/show/list/update/create/close/dep/label/comments/audit/
-# stats/blocked/...) all operate on the DB and route correctly.
+# All data verbs (ready/show/list/update/create/close/dep/label/comments/audit/
+# stats/blocked/...) operate on the DB and route correctly. The only two
+# subcommands you should NOT route are the setup-only ones that write
+# cwd-relative files — `init` and `agents --add/--remove/--update` (it just
+# maintains a static instructions block in AGENTS.md; edit by hand, or run it
+# with br-real / BEADS_NO_SHIM=1 in the repo). They're never part of normal
+# agent flow, so this is a non-issue in practice.
 
 REAL="$HOME/.local/bin/br-real"
 
