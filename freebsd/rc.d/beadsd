@@ -1,0 +1,72 @@
+#!/bin/sh
+#
+# PROVIDE: beadsd
+# REQUIRE: NETWORKING
+# KEYWORD: shutdown
+#
+# Single-writer beads service. ONE instance per project. rc.subr namespaces
+# every variable by the script's filename, so install this script once per
+# project under a distinct name (beadsd_mu, beadsd_at, …) — e.g. by symlink:
+#
+#   ln -s /usr/local/etc/rc.d/beadsd /usr/local/etc/rc.d/beadsd_mu
+#   ln -s /usr/local/etc/rc.d/beadsd /usr/local/etc/rc.d/beadsd_at
+#
+# Then in /etc/rc.conf, per instance (mu shown):
+#
+#   beadsd_mu_enable="YES"
+#   beadsd_mu_user="tcovert"
+#   beadsd_mu_db="/home/tcovert/src/beads-central/mu/.beads/beads.db"
+#   beadsd_mu_listen="0.0.0.0:7771"
+#   beadsd_mu_repo="/home/tcovert/src/beads-central"   # enables the snapshot committer
+#
+# Optional overrides (defaults derived from *_user):
+#   beadsd_mu_home, beadsd_mu_command, beadsd_mu_br_bin,
+#   beadsd_mu_log, beadsd_mu_rust_log, beadsd_mu_commit_interval
+
+. /etc/rc.subr
+
+name=$(basename "$0")
+rcvar="${name}_enable"
+
+load_rc_config "$name"
+
+eval ": \${${name}_enable:=\"NO\"}"
+eval "_user=\"\${${name}_user:-}\""
+eval "_db=\"\${${name}_db:-}\""
+eval "_listen=\"\${${name}_listen:-0.0.0.0:7777}\""
+eval "_repo=\"\${${name}_repo:-}\""
+eval "_home=\"\${${name}_home:-/home/${_user}}\""
+eval "_command=\"\${${name}_command:-${_home}/.local/bin/beadsd}\""
+eval "_brbin=\"\${${name}_br_bin:-${_home}/.local/bin/br}\""
+eval "_log=\"\${${name}_log:-/var/log/${name}.log}\""
+eval "_rust_log=\"\${${name}_rust_log:-beadsd=info}\""
+eval "_interval=\"\${${name}_commit_interval:-30}\""
+
+# Required config — fail loudly rather than crash later.
+[ -n "${_user}" ] || err 1 "${name}_user is not set in /etc/rc.conf"
+[ -n "${_db}" ]   || err 1 "${name}_db is not set in /etc/rc.conf"
+
+# rc.subr wraps the command with `su -m ${name}_user`, so daemon(8) runs as
+# that user. We deliberately do NOT pass `daemon -u` (that + `-r` loops
+# setusercontext() and crashes on restart — same trap as claude_proxy). HOME
+# must be set explicitly: env(1) does not carry it through.
+pidfile="/var/run/${name}/${name}.pid"
+
+_repo_args=""
+[ -n "${_repo}" ] && _repo_args="--repo ${_repo} --commit-interval-secs ${_interval}"
+
+command="/usr/sbin/daemon"
+command_args="-r -P ${pidfile} -o ${_log} \
+    /usr/bin/env HOME=${_home} RUST_LOG=${_rust_log} \
+    ${_command} --db ${_db} --listen ${_listen} --br-bin ${_brbin} ${_repo_args}"
+
+start_precmd="beadsd_prestart"
+beadsd_prestart() {
+    # Pidfile + log under a user-owned dir: the daemon runs as ${_user} (rc.subr
+    # su -m) and cannot write /var/run (root:wheel 755).
+    install -d -o "${_user}" -g "${_user}" -m 0755 "/var/run/${name}"
+    install -o "${_user}" -g "${_user}" -m 644 /dev/null "${_log}" 2>/dev/null || \
+        chown "${_user}:${_user}" "${_log}"
+}
+
+run_rc_command "$1"
