@@ -113,7 +113,10 @@ bead, mapped via the bead's `external_ref`. Config: `~/.config/beads/github.env`
   bead changes. Idempotent; safe to run from cron. A **Related** block in each
   issue body cross-links parent / blocked-by / blocks / sub-tasks to the other
   mirrored issues as real `#n` links (falling back to the bead id when a related
-  bead isn't mirrored).
+  bead isn't mirrored). `scripts/beads-gh-sync-all.sh` runs a sync per
+  `github.env` project and is wired into cron (every 10 min; no-op/quiet when
+  nothing changed), so labeled beads stay mirrored automatically. Log:
+  `~/.local/share/beadsd/gh-sync.log`.
 - **Inbound (issue → bead), gated — never automatic.**
   `scripts/beads-gh-triage.py <project> <list|show|accept|skip>`: `list` shows open
   issues not yet triaged (no `beads`/`triage-skip` label); `accept <#>` creates a
