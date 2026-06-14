@@ -100,6 +100,28 @@ to install + start its `beadsd_<repo>` service plus the one `remotes.env` line
 that makes `br`/sprint in that repo route to the central writer. The working repo
 needs no local `.beads` — don't `br init` there.
 
+### GitHub issues integration (optional, opt-in)
+
+A lightweight, asymmetric bridge between beads and GitHub issues — 1 issue per
+bead, mapped via the bead's `external_ref`. Config: `~/.config/beads/github.env`
+(`project=owner/repo`, see `config/github.env.example`).
+
+- **Outbound (bead → issue), automatic, beads = source of truth.**
+  `scripts/beads-gh-sync.py <project> [--dry-run]` mirrors only beads labeled
+  **`gh`** (opt-in — you choose what's public): creates an issue (labeled `beads`)
+  and stamps `external_ref`, or edits the issue title/body/state to match when the
+  bead changes. Idempotent; safe to run from cron. Cross-references between beads
+  ride along as plain text in the body.
+- **Inbound (issue → bead), gated — never automatic.**
+  `scripts/beads-gh-triage.py <project> <list|show|accept|skip>`: `list` shows open
+  issues not yet triaged (no `beads`/`triage-skip` label); `accept <#>` creates a
+  bead (labeled `gh`, linked via `external_ref`) and labels the issue `beads`;
+  `skip <#>` labels `triage-skip`. Nothing creates beads on its own — no DoS.
+
+The `beads` label on an issue is the loop-breaker: it distinguishes "an issue we
+created/track from a bead" from "a new human-filed issue awaiting triage." All `gh`
+calls run through the beadsd service, so beads stay single-writer-consistent.
+
 ### Mirroring the audit trail to GitHub
 
 The committers commit `issues.jsonl` snapshots locally; `scripts/push-central.sh`
