@@ -1,0 +1,21 @@
+# Shared beadsd defaults — install at ~/.config/beadsd/config.toml
+# (layered UNDER each per-instance config; per-instance files override these).
+#
+# Every field is optional; these are the built-in defaults shown explicitly.
+
+# Path to the br binary.
+br_bin = "br"
+
+# Debounced snapshot-commit interval in seconds (0 disables the committer).
+commit_interval_secs = 30
+
+# HTTP mount points.
+mcp_path = "/mcp"
+health_path = "/health"
+
+# Identity for snapshot commits. No PII — the central repo may be public.
+git_author_name = "beadsd"
+git_author_email = "beadsd@localhost"
+
+# A default bind; per-instance configs set a concrete ip:port.
+listen = "0.0.0.0:7777"

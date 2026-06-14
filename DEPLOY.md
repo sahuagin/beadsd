@@ -41,21 +41,28 @@ first non-free rollback is flagged.
 
 ## Stage 1 — supervise (rc.d)
 
-5. Install the supervision script and per-project instances:
+5. Install per-instance config (db, ip:port, repo all live here — see
+   `config/*.example.toml`):
+   ```sh
+   mkdir -p ~/.config/beadsd
+   cp ~/src/beadsd/config/config.example.toml       ~/.config/beadsd/config.toml
+   cp ~/src/beadsd/config/mu.example.toml            ~/.config/beadsd/mu.toml
+   cp ~/src/beadsd/config/agent_tools.example.toml   ~/.config/beadsd/agent_tools.toml
+   # edit paths/ports if they differ from the defaults
+   ```
+6. Install the supervision script + per-project instances and enable them. The
+   rc.d derives each instance's config from its name (`beadsd_mu` → `mu.toml`):
    ```sh
    doas install -m 0555 ~/src/beadsd/freebsd/rc.d/beadsd /usr/local/etc/rc.d/beadsd
    doas ln -s /usr/local/etc/rc.d/beadsd /usr/local/etc/rc.d/beadsd_mu
-   doas ln -s /usr/local/etc/rc.d/beadsd /usr/local/etc/rc.d/beadsd_at
+   doas ln -s /usr/local/etc/rc.d/beadsd /usr/local/etc/rc.d/beadsd_agent_tools
+   # /etc/rc.conf — only enable + user per instance:
+   #   beadsd_mu_enable="YES"
+   #   beadsd_mu_user="tcovert"
+   #   beadsd_agent_tools_enable="YES"
+   #   beadsd_agent_tools_user="tcovert"
    ```
-6. Add to `/etc/rc.conf` (mu shown; repeat for `beadsd_at` → agent_tools, :7772):
-   ```sh
-   beadsd_mu_enable="YES"
-   beadsd_mu_user="tcovert"
-   beadsd_mu_db="/home/tcovert/src/beads-central/mu/.beads/beads.db"
-   beadsd_mu_listen="0.0.0.0:7771"
-   beadsd_mu_repo="/home/tcovert/src/beads-central"
-   ```
-7. `doas service beadsd_mu start && doas service beadsd_at start`; re-run the
+7. `doas service beadsd_mu start && doas service beadsd_agent_tools start`; re-run the
    Stage-0 smoke against the supervised endpoints; confirm `/health` and that a
    mutation produces a `beadsd: snapshot <project>` commit in the central repo.
    - **Rollback:** `service beadsd_* stop`; set `*_enable="NO"`.

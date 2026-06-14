@@ -1,0 +1,6 @@
+# Per-instance config for the agent_tools beadsd — install at
+# ~/.config/beadsd/agent_tools.toml
+
+db = "/home/tcovert/src/beads-central/agent_tools/.beads/beads.db"
+listen = "0.0.0.0:7772"
+repo = "/home/tcovert/src/beads-central"

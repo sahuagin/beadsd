@@ -1,0 +1,6 @@
+# Per-instance config for the mu beadsd — install at ~/.config/beadsd/mu.toml
+# Holds the values that differ per project: the DB, the bind ip:port, the repo.
+
+db = "/home/tcovert/src/beads-central/mu/.beads/beads.db"
+listen = "0.0.0.0:7771"
+repo = "/home/tcovert/src/beads-central"

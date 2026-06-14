@@ -17,10 +17,14 @@
 //! effective-priority behavior comes along for free, and upstream merges of br
 //! never touch this code.
 
+mod config;
+
 use std::path::{Path, PathBuf};
 use std::process::Stdio;
 use std::sync::Arc;
 use std::time::{Duration, SystemTime};
+
+use config::Config;
 
 use clap::Parser;
 use rmcp::handler::server::wrapper::Parameters;
@@ -367,7 +371,13 @@ impl ServerHandler for BeadsServer {}
 /// Commit `jsonl` (relative to `repo`) if it has tracked/untracked changes.
 /// Returns Ok(true) if a commit was made, Ok(false) if there was nothing to
 /// commit, Err on a git failure worth retrying.
-async fn git_commit_once(repo: &Path, rel: &Path, msg: &str) -> anyhow::Result<bool> {
+async fn git_commit_once(
+    repo: &Path,
+    rel: &Path,
+    msg: &str,
+    author_name: &str,
+    author_email: &str,
+) -> anyhow::Result<bool> {
     // Stage the one path. Tolerate races by surfacing the error for retry.
     let add = Command::new("git")
         .arg("-C")
@@ -387,7 +397,10 @@ async fn git_commit_once(repo: &Path, rel: &Path, msg: &str) -> anyhow::Result<b
     let commit = Command::new("git")
         .arg("-C")
         .arg(repo)
-        .args(["-c", "user.name=beadsd", "-c", "user.email=beadsd@localhost"])
+        .arg("-c")
+        .arg(format!("user.name={author_name}"))
+        .arg("-c")
+        .arg(format!("user.email={author_email}"))
         .arg("commit")
         .arg("-m")
         .arg(msg)
@@ -412,7 +425,13 @@ async fn git_commit_once(repo: &Path, rel: &Path, msg: &str) -> anyhow::Result<b
     anyhow::bail!("git commit failed: {combined}");
 }
 
-async fn run_committer(repo: PathBuf, jsonl: PathBuf, interval: Duration) {
+async fn run_committer(
+    repo: PathBuf,
+    jsonl: PathBuf,
+    interval: Duration,
+    author_name: String,
+    author_email: String,
+) {
     let rel = jsonl
         .strip_prefix(&repo)
         .map(Path::to_path_buf)
@@ -434,7 +453,7 @@ async fn run_committer(repo: PathBuf, jsonl: PathBuf, interval: Duration) {
         if last == Some(mtime) {
             continue; // unchanged since last commit
         }
-        match git_commit_once(&repo, &rel, &msg).await {
+        match git_commit_once(&repo, &rel, &msg, &author_name, &author_email).await {
             Ok(true) => {
                 last = Some(mtime);
                 tracing::info!(path = %rel.display(), "committed snapshot");
@@ -447,31 +466,35 @@ async fn run_committer(repo: PathBuf, jsonl: PathBuf, interval: Duration) {
 
 // ── Entrypoint ────────────────────────────────────────────────────────────────
 
+/// CLI flags. Config comes from layered TOML/env (see `config`); any flag set
+/// here overrides the loaded config as the final layer.
 #[derive(Parser, Debug)]
 #[command(name = "beadsd", about = "Single-writer beads (br) service over rmcp streamable-HTTP")]
 struct Args {
-    /// Path to the central project DB this instance owns, e.g.
-    /// /home/tcovert/src/beads-central/mu/.beads/beads.db
+    /// Per-instance config file (e.g. ~/.config/beadsd/mu.toml), layered over
+    /// the system/user defaults.
     #[arg(long)]
-    db: PathBuf,
+    config: Option<PathBuf>,
 
-    /// Address to bind, e.g. 0.0.0.0:7777 (network-reachable, trusted network).
-    #[arg(long, default_value = "0.0.0.0:7777")]
-    listen: String,
+    /// Override: path to the central project DB this instance owns.
+    #[arg(long)]
+    db: Option<PathBuf>,
 
-    /// Path to the br binary.
-    #[arg(long, default_value = "br")]
-    br_bin: String,
+    /// Override: address to bind, e.g. 0.0.0.0:7771.
+    #[arg(long)]
+    listen: Option<String>,
 
-    /// Central git repo root that owns the checkout. When set (with a non-zero
-    /// interval), beadsd debounce-commits this project's issues.jsonl for audit
-    /// and backup. Derived jsonl: <db dir>/issues.jsonl.
+    /// Override: path to the br binary.
+    #[arg(long)]
+    br_bin: Option<String>,
+
+    /// Override: central git repo root for the snapshot committer.
     #[arg(long)]
     repo: Option<PathBuf>,
 
-    /// Seconds between debounced snapshot commits (0 disables the committer).
-    #[arg(long, default_value_t = 30)]
-    commit_interval_secs: u64,
+    /// Override: seconds between debounced snapshot commits (0 disables).
+    #[arg(long)]
+    commit_interval_secs: Option<u64>,
 }
 
 #[tokio::main]
@@ -485,28 +508,56 @@ async fn main() -> anyhow::Result<()> {
 
     let args = Args::parse();
 
-    if !args.db.exists() {
-        anyhow::bail!("db path does not exist: {}", args.db.display());
+    // Layered config, then apply CLI overrides as the final layer.
+    let mut cfg = Config::load(args.config.as_deref())?;
+    if let Some(v) = args.db {
+        cfg.db = Some(v);
     }
-    let db_path = std::fs::canonicalize(&args.db)?;
+    if let Some(v) = args.listen {
+        cfg.listen = v;
+    }
+    if let Some(v) = args.br_bin {
+        cfg.br_bin = v;
+    }
+    if args.repo.is_some() {
+        cfg.repo = args.repo;
+    }
+    if let Some(v) = args.commit_interval_secs {
+        cfg.commit_interval_secs = v;
+    }
+
+    let db = cfg
+        .db
+        .clone()
+        .ok_or_else(|| anyhow::anyhow!("no db configured (set `db` in config or pass --db)"))?;
+    if !db.exists() {
+        anyhow::bail!("db path does not exist: {}", db.display());
+    }
+    let db_path = std::fs::canonicalize(&db)?;
     let db_display = db_path.display().to_string();
 
     // Optional background committer: snapshot <db dir>/issues.jsonl into the
     // central repo on a debounced interval.
-    if let Some(repo) = args.repo.clone() {
-        if args.commit_interval_secs > 0 {
+    if let Some(repo) = cfg.repo.clone() {
+        if cfg.commit_interval_secs > 0 {
             let repo = std::fs::canonicalize(&repo)
-                .map_err(|e| anyhow::anyhow!("--repo {}: {e}", repo.display()))?;
+                .map_err(|e| anyhow::anyhow!("repo {}: {e}", repo.display()))?;
             let jsonl = db_path
                 .parent()
                 .map(|d| d.join("issues.jsonl"))
                 .ok_or_else(|| anyhow::anyhow!("db path has no parent dir"))?;
-            let interval = Duration::from_secs(args.commit_interval_secs);
-            tokio::spawn(run_committer(repo, jsonl, interval));
+            let interval = Duration::from_secs(cfg.commit_interval_secs);
+            tokio::spawn(run_committer(
+                repo,
+                jsonl,
+                interval,
+                cfg.git_author_name.clone(),
+                cfg.git_author_email.clone(),
+            ));
         }
     }
 
-    let server = BeadsServer::new(args.br_bin.clone(), db_path);
+    let server = BeadsServer::new(cfg.br_bin.clone(), db_path);
 
     let service: StreamableHttpService<BeadsServer, LocalSessionManager> =
         StreamableHttpService::new(
@@ -516,12 +567,15 @@ async fn main() -> anyhow::Result<()> {
         );
 
     let app = axum::Router::new()
-        .route("/health", axum::routing::get(|| async { "ok" }))
-        .nest_service("/mcp", service);
+        .route(&cfg.health_path, axum::routing::get(|| async { "ok" }))
+        .nest_service(&cfg.mcp_path, service);
 
-    let listener = tokio::net::TcpListener::bind(&args.listen).await?;
+    let listener = tokio::net::TcpListener::bind(&cfg.listen).await?;
     let bound = listener.local_addr()?;
-    tracing::info!(db = %db_display, br = %args.br_bin, addr = %bound, "beadsd serving /mcp");
+    tracing::info!(
+        db = %db_display, br = %cfg.br_bin, addr = %bound,
+        mcp = %cfg.mcp_path, "beadsd serving"
+    );
 
     axum::serve(listener, app).await?;
     Ok(())

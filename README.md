@@ -49,9 +49,13 @@ touch this code, and the fork's effective-priority behavior comes along for free
 
 ## Binaries
 
-- **`beadsd`** — the service. `beadsd --db <central-db> --listen 0.0.0.0:<port>
-  [--repo <central-repo> --commit-interval-secs N] [--br-bin <path>]`. Serves MCP
-  at `/mcp` and a `/health` route.
+- **`beadsd`** — the service. Configured via layered TOML (`config` module):
+  built-in defaults → `/etc/beadsd/config.toml` → `~/.config/beadsd/config.toml`
+  → `--config <file>` (per-instance) → `BEADSD_*` env → CLI flags. So `listen`
+  (ip:port), `db`, `repo`, `br_bin`, the commit interval, the `/mcp` + `/health`
+  paths, and the git-snapshot identity all live in config, not in code. Typical
+  run: `beadsd --config ~/.config/beadsd/mu.toml`. Any field is overridable with
+  a CLI flag (`--db`, `--listen`, …) or env var. See `config/*.example.toml`.
 - **`beads`** — thin client for scripts/humans. `beads <verb> [...] --url
   $BEADS_REMOTE`. Exits non-zero (with detail on stderr) when beadsd reports a br
   failure (e.g. a claim conflict), so `if ! beads claim …` works.

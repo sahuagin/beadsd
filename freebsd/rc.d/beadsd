@@ -11,17 +11,16 @@
 #   ln -s /usr/local/etc/rc.d/beadsd /usr/local/etc/rc.d/beadsd_mu
 #   ln -s /usr/local/etc/rc.d/beadsd /usr/local/etc/rc.d/beadsd_at
 #
-# Then in /etc/rc.conf, per instance (mu shown):
+# All per-instance settings (db, listen ip:port, repo) live in a TOML config:
+# by default ~<user>/.config/beadsd/<instance>.toml, where <instance> is the
+# script name minus the "beadsd_" prefix (beadsd_mu -> mu.toml). See
+# config/*.example.toml in the beadsd repo.
 #
+# /etc/rc.conf (mu shown):
 #   beadsd_mu_enable="YES"
 #   beadsd_mu_user="tcovert"
-#   beadsd_mu_db="/home/tcovert/src/beads-central/mu/.beads/beads.db"
-#   beadsd_mu_listen="0.0.0.0:7771"
-#   beadsd_mu_repo="/home/tcovert/src/beads-central"   # enables the snapshot committer
-#
-# Optional overrides (defaults derived from *_user):
-#   beadsd_mu_home, beadsd_mu_command, beadsd_mu_br_bin,
-#   beadsd_mu_log, beadsd_mu_rust_log, beadsd_mu_commit_interval
+#   # optional: beadsd_mu_config="/home/tcovert/.config/beadsd/mu.toml"
+#   # optional: beadsd_mu_command, beadsd_mu_log, beadsd_mu_rust_log
 
 . /etc/rc.subr
 
@@ -32,19 +31,17 @@ load_rc_config "$name"
 
 eval ": \${${name}_enable:=\"NO\"}"
 eval "_user=\"\${${name}_user:-}\""
-eval "_db=\"\${${name}_db:-}\""
-eval "_listen=\"\${${name}_listen:-0.0.0.0:7777}\""
-eval "_repo=\"\${${name}_repo:-}\""
 eval "_home=\"\${${name}_home:-/home/${_user}}\""
 eval "_command=\"\${${name}_command:-${_home}/.local/bin/beadsd}\""
-eval "_brbin=\"\${${name}_br_bin:-${_home}/.local/bin/br}\""
 eval "_log=\"\${${name}_log:-/var/log/${name}.log}\""
 eval "_rust_log=\"\${${name}_rust_log:-beadsd=info}\""
-eval "_interval=\"\${${name}_commit_interval:-30}\""
 
-# Required config — fail loudly rather than crash later.
+# Per-instance config path: default ~<user>/.config/beadsd/<instance>.toml.
+_instance=${name#beadsd_}
+eval "_config=\"\${${name}_config:-${_home}/.config/beadsd/${_instance}.toml}\""
+
 [ -n "${_user}" ] || err 1 "${name}_user is not set in /etc/rc.conf"
-[ -n "${_db}" ]   || err 1 "${name}_db is not set in /etc/rc.conf"
+[ -f "${_config}" ] || err 1 "config not found: ${_config} (see config/*.example.toml)"
 
 # rc.subr wraps the command with `su -m ${name}_user`, so daemon(8) runs as
 # that user. We deliberately do NOT pass `daemon -u` (that + `-r` loops
@@ -52,13 +49,10 @@ eval "_interval=\"\${${name}_commit_interval:-30}\""
 # must be set explicitly: env(1) does not carry it through.
 pidfile="/var/run/${name}/${name}.pid"
 
-_repo_args=""
-[ -n "${_repo}" ] && _repo_args="--repo ${_repo} --commit-interval-secs ${_interval}"
-
 command="/usr/sbin/daemon"
 command_args="-r -P ${pidfile} -o ${_log} \
     /usr/bin/env HOME=${_home} RUST_LOG=${_rust_log} \
-    ${_command} --db ${_db} --listen ${_listen} --br-bin ${_brbin} ${_repo_args}"
+    ${_command} --config ${_config}"
 
 start_precmd="beadsd_prestart"
 beadsd_prestart() {
