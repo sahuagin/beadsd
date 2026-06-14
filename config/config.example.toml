@@ -3,10 +3,11 @@
 #
 # Every field is optional; these are the built-in defaults shown explicitly.
 
-# Path to the br binary. Bare "br" resolves via PATH — the rc.d puts
-# ~/.local/bin on the daemon's PATH. Use an absolute path only if running
-# beadsd in an environment where br isn't on PATH.
-br_bin = "br"
+# Path to the REAL br binary. If you install the transparent `br` shim (see
+# DEPLOY.md), this MUST point at the real binary (e.g. ~/.local/bin/br-real),
+# NOT at "br" — otherwise the server would invoke the shim and recurse. Without
+# the shim, bare "br" is fine (the rc.d puts ~/.local/bin on PATH).
+br_bin = "/home/tcovert/.local/bin/br-real"
 
 # Debounced snapshot-commit interval in seconds (0 disables the committer).
 commit_interval_secs = 30

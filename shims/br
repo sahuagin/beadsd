@@ -1,0 +1,44 @@
+#!/bin/sh
+# br — transparent shim around the real br binary (br-real).
+#
+# In a repo that has been centralized into beadsd (an entry in
+# ~/.config/beads/remotes.env, keyed by the backing-repo basename), route the
+# WHOLE command line to the single-writer service so every br invocation hits
+# the central DB — no divergent per-workspace/local DBs. Everywhere else, exec
+# the real br binary unchanged.
+#
+# Bypass routing (use the local DB directly): export BEADS_NO_SHIM=1, or pass an
+# explicit --db, or run outside a centralized repo.
+#
+# Caveat: subcommands with cwd-relative file side effects (e.g. `agents --add`
+# writing AGENTS.md, `init`) run in the SERVER's cwd when routed. The common
+# data verbs (ready/show/list/update/create/close/dep/label/comments/audit/
+# stats/blocked/...) all operate on the DB and route correctly.
+
+REAL="$HOME/.local/bin/br-real"
+
+# Explicit bypass.
+[ "${BEADS_NO_SHIM:-0}" = "1" ] && exec "$REAL" "$@"
+
+# A caller-pinned --db / --no-db means "use this DB" — honor it, don't route.
+for a in "$@"; do
+    case "$a" in
+        --db|--db=*|--no-db) exec "$REAL" "$@" ;;
+    esac
+done
+
+# Resolve the backing repo and its beadsd endpoint (if centralized).
+# sprint-lib provides backing_root (jj-workspace-aware) + beads_endpoint.
+if [ -r "$HOME/.local/lib/sprint-lib.sh" ]; then
+    . "$HOME/.local/lib/sprint-lib.sh"
+else
+    exec "$REAL" "$@"
+fi
+
+ROOT=$(backing_root 2>/dev/null) || exec "$REAL" "$@"
+[ -n "$ROOT" ] || exec "$REAL" "$@"
+ENDPOINT=$(beads_endpoint "$(basename "$ROOT")")
+[ -n "$ENDPOINT" ] || exec "$REAL" "$@"
+
+# Centralized: route the entire command line to the single writer.
+exec beads --url "$ENDPOINT" exec -- "$@"

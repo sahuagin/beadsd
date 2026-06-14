@@ -94,6 +94,13 @@ enum Cmd {
         #[arg(long)]
         actor: Option<String>,
     },
+    /// Run an arbitrary br subcommand against the central DB (the `br` shim
+    /// uses this). stdout/stderr/exit code are replicated faithfully.
+    /// Example: `beads --url <u> exec -- ready --json`.
+    Exec {
+        #[arg(trailing_var_arg = true, allow_hyphen_values = true)]
+        args: Vec<String>,
+    },
 }
 
 /// Map the subcommand to a (tool_name, arguments) pair.
@@ -140,6 +147,7 @@ fn to_call(cmd: &Cmd) -> (&'static str, Value) {
                 ("actor", actor.as_ref().map(|v| json!(v))),
             ]),
         ),
+        Cmd::Exec { args } => ("br_exec", json!({ "args": args })),
     }
 }
 
@@ -180,6 +188,25 @@ async fn main() -> anyhow::Result<()> {
         .iter()
         .find_map(|c| serde_json::to_value(c).ok()?.get("text")?.as_str().map(str::to_owned))
         .unwrap_or_default();
+
+    // exec passthrough: replicate br's stdout/stderr and exit code faithfully.
+    if matches!(cli.cmd, Cmd::Exec { .. }) {
+        use std::io::Write;
+        if let Ok(Value::Object(o)) = serde_json::from_str::<Value>(&text) {
+            if let Some(s) = o.get("stdout").and_then(Value::as_str) {
+                print!("{s}");
+                let _ = std::io::stdout().flush();
+            }
+            if let Some(s) = o.get("stderr").and_then(Value::as_str) {
+                eprint!("{s}");
+                let _ = std::io::stderr().flush();
+            }
+            let code = o.get("exit_code").and_then(Value::as_i64).unwrap_or(0);
+            std::process::exit(code as i32);
+        }
+        eprintln!("{text}");
+        std::process::exit(1);
+    }
 
     // Detect beadsd's failure envelope: {"error": "...", ...}.
     if let Ok(Value::Object(o)) = serde_json::from_str::<Value>(&text) {

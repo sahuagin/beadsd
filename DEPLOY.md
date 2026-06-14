@@ -144,6 +144,34 @@ this is additive and safe to land before cutover.
     legacy local-DB branch from the claim/release blocks.
     - **Rollback:** restore the deleted functions from git.
 
+## Stage 3.5 — transparent `br` shim (route ALL raw br to the service)
+
+Repointing sprint only routes the *sprint* claim path. Agents and automation
+that call `br` directly (`br ready`, `br update`, …) still hit the local DB. The
+shim closes that: in a centralized repo, `br` forwards the whole command line to
+beadsd; everywhere else it execs the real binary. Powered by the `br_exec` tool
++ the `beads exec` passthrough verb.
+
+Order matters — point the server at the real binary BEFORE the shim becomes `br`,
+or the server recurses into its own shim:
+
+1. `ln -sf "$(readlink ~/.local/bin/br)" ~/.local/bin/br-real`  (escape hatch +
+   what the server and shim call).
+2. Set `br_bin = "/home/tcovert/.local/bin/br-real"` in `~/.config/beadsd/config.toml`,
+   then restart the services (`service beadsd_mu restart` etc., or kill the child
+   — daemon -r respawns and re-reads config). Verify `beads --url <u> exec -- stats`
+   returns the central totals.
+3. Install the shim as `br` (keep `br-real` as the escape hatch):
+   ```sh
+   rm -f ~/.local/bin/br
+   install -m 0755 ~/src/beadsd/shims/br ~/.local/bin/br
+   ```
+4. Verify: `br ready` in mu routes to central (no recursion); `br --version` in a
+   non-centralized repo runs the real binary; `BEADS_NO_SHIM=1 br …` and `br-real`
+   both bypass to local.
+
+Bypass routing anytime with `BEADS_NO_SHIM=1`, an explicit `--db`, or `br-real`.
+
 ## Stage 4 — remove `.beads/` from the hosting repos (LAST; first non-free rollback)
 
 15. Only after days of trusted operation: `git rm -r .beads/` in `mu` and

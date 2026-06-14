@@ -58,7 +58,15 @@ touch this code, and the fork's effective-priority behavior comes along for free
   a CLI flag (`--db`, `--listen`, …) or env var. See `config/*.example.toml`.
 - **`beads`** — thin client for scripts/humans. `beads <verb> [...] --url
   $BEADS_REMOTE`. Exits non-zero (with detail on stderr) when beadsd reports a br
-  failure (e.g. a claim conflict), so `if ! beads claim …` works.
+  failure (e.g. a claim conflict), so `if ! beads claim …` works. Also
+  `beads exec -- <br args>` runs an arbitrary br subcommand against the central
+  DB (used by the shim).
+- **`shims/br`** — a transparent `br` shim. Installed as `~/.local/bin/br`, it
+  routes the whole command line to beadsd for any centralized repo (an entry in
+  `~/.config/beads/remotes.env`) and execs the real binary (`br-real`) everywhere
+  else — so raw `br ready`/`br update`/… hit the single writer with no divergence.
+  Bypass with `BEADS_NO_SHIM=1`, an explicit `--db`, or `br-real`. The server's
+  `br_exec` tool is what executes the forwarded commands against the central DB.
 
 ## Build
 

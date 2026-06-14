@@ -140,6 +140,37 @@ pub struct CloseReq {
     pub actor: Option<String>,
 }
 
+#[derive(Debug, Deserialize, Serialize, JsonSchema)]
+pub struct ExecReq {
+    /// Raw br arguments, e.g. ["ready", "--json"] or ["update", "mu-x", "-s",
+    /// "in_progress"]. Any caller-supplied `--db`/`--no-db` is stripped; the
+    /// central DB is always forced. This is the passthrough the `br` shim uses
+    /// to route arbitrary br subcommands to the single writer.
+    pub args: Vec<String>,
+}
+
+/// Drop any caller-supplied `--db <val>`, `--db=<val>`, and `--no-db` so an
+/// exec can never escape the central DB.
+fn strip_db_args(args: Vec<String>) -> Vec<String> {
+    let mut out = Vec::with_capacity(args.len());
+    let mut skip_next = false;
+    for a in args {
+        if skip_next {
+            skip_next = false;
+            continue;
+        }
+        if a == "--db" {
+            skip_next = true; // also drop its value
+            continue;
+        }
+        if a == "--no-db" || a.starts_with("--db=") {
+            continue;
+        }
+        out.push(a);
+    }
+    out
+}
+
 // ── Server state ──────────────────────────────────────────────────────────────
 
 #[derive(Clone)]
@@ -350,6 +381,43 @@ impl BeadsServer {
             args.push(a);
         }
         self.run_br(args, true).await
+    }
+
+    #[tool(
+        name = "br_exec",
+        description = "Run an arbitrary br subcommand against the central DB and return {stdout, stderr, exit_code}. Caller --db is stripped; the central DB is forced. Powers the transparent `br` shim."
+    )]
+    async fn br_exec(&self, Parameters(req): Parameters<ExecReq>) -> String {
+        let mut args = strip_db_args(req.args);
+        args.push("--db".into());
+        args.push(self.db_path.to_string_lossy().into_owned());
+
+        // Serialize all exec calls: we can't cheaply tell reads from writes by
+        // argv, and br ops are fast. fsqlite is concurrency-safe anyway; this
+        // just keeps ordering clean.
+        let _guard = self.write_lock.lock().await;
+
+        let output = Command::new(self.br_bin.as_str())
+            .args(&args)
+            .env("RUST_LOG", "error")
+            .stdin(Stdio::null())
+            .output()
+            .await;
+
+        match output {
+            Ok(o) => json!({
+                "stdout": String::from_utf8_lossy(&o.stdout),
+                "stderr": String::from_utf8_lossy(&o.stderr),
+                "exit_code": o.status.code().unwrap_or(-1),
+            })
+            .to_string(),
+            Err(e) => json!({
+                "stdout": "",
+                "stderr": format!("beadsd: failed to spawn br ({}): {e}", self.br_bin),
+                "exit_code": 127,
+            })
+            .to_string(),
+        }
     }
 }
 
