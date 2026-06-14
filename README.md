@@ -90,3 +90,18 @@ beads ready
 See [`DEPLOY.md`](DEPLOY.md) for the staged migration (central repo, rc.d
 supervision, sprint repoint, cutover) with rollback at each step, and
 [`freebsd/rc.d/beadsd`](freebsd/rc.d/beadsd) for the supervision script.
+
+### Onboarding a new project
+
+`scripts/beads-onboard <repo> [--prefix PX] [--port N]` does the non-root parts —
+creates the project's beads in the central repo (committed), writes its
+`~/.config/beadsd/<repo>.toml` (auto-assigned port), and prints the `doas` block
+to install + start its `beadsd_<repo>` service plus the one `remotes.env` line
+that makes `br`/sprint in that repo route to the central writer. The working repo
+needs no local `.beads` — don't `br init` there.
+
+### Mirroring the audit trail to GitHub
+
+The committers commit `issues.jsonl` snapshots locally; `scripts/push-central.sh`
+is the single pusher (always fast-forward, no-op when nothing's pending) and runs
+from cron every 5 minutes. Log: `~/.local/share/beadsd/push-central.log`.

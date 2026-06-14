@@ -182,11 +182,20 @@ Bypass routing anytime with `BEADS_NO_SHIM=1`, an explicit `--db`, or `br-real`.
       (`br sync --flush-only --db <central>` into a restored `.beads/`), not a
       plain revert. That's why this stage is last.
 
-## Reserved projects (warden, agentic-bench, claude-proxy)
+## Onboarding a new project (incl. reserved: warden, agentic-bench, claude-proxy)
 
-Do not pre-create empty DBs. When the first bead for one is filed, `br init` its
-subdir in the central checkout, add a `beadsd_<name>` rc.d instance + port + a
-`remotes.env` line. Treat the names as reserved namespaces, materialized on demand.
+Don't pre-create empty DBs — materialize on demand. `scripts/beads-onboard <repo>`
+automates it: it `br init`s the subdir in the central checkout (committed), writes
+`~/.config/beadsd/<repo>.toml` with an auto-assigned port, and prints the `doas`
+block (`install` the rc.d as `beadsd_<repo>`, `sysrc` enable + user, `service
+start`) plus the `remotes.env` line that makes the route live. After that, plain
+`br` and `sprint-start` in that repo hit the central writer.
+
+## Mirroring the central audit trail to GitHub
+
+`scripts/push-central.sh` (cron, every 5 min) is the single pusher of
+`beads-central` — fast-forward only, no-op when nothing's pending, logs to
+`~/.local/share/beadsd/push-central.log`.
 
 ## Invariants / guardrails
 

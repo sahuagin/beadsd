@@ -1,0 +1,93 @@
+#!/bin/sh
+# beads-onboard <repo> [--prefix PX] [--port N]
+#
+# Onboard a new project into the central beadsd setup so its `br` / sprint usage
+# routes to the single writer (no divergent local DB). Does the non-root parts:
+#   1. create the project's beads in the central repo (br init) + commit
+#   2. write its per-instance config ~/.config/beadsd/<repo>.toml (auto port)
+# then prints the doas block to install + start its service, and the one line to
+# add to remotes.env to make the route go live.
+#
+# <repo> is the backing-repo basename (what `basename $(jj root)` yields), which
+# is also the remotes.env key. Prefix defaults to the first 3 alnum chars; port
+# defaults to one past the highest configured instance.
+set -eu
+
+CENTRAL="${BEADS_CENTRAL:-$HOME/src/public_github/beads-central}"
+CONFDIR="${BEADS_CONFDIR:-$HOME/.config/beadsd}"
+REMOTES="${BEADS_REMOTES:-$HOME/.config/beads/remotes.env}"
+BR="${BEADS_BR_REAL:-br-real}"
+RCD="$HOME/src/beadsd/freebsd/rc.d/beadsd"
+
+die() { echo "beads-onboard: $1" >&2; exit 1; }
+
+REPO=""; PREFIX=""; PORT=""
+while [ $# -gt 0 ]; do
+    case "$1" in
+        --prefix) shift; [ $# -gt 0 ] || die "--prefix needs a value"; PREFIX="$1" ;;
+        --port)   shift; [ $# -gt 0 ] || die "--port needs a value"; PORT="$1" ;;
+        -h|--help) sed -n '2,18p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
+        -*) die "unknown flag: $1" ;;
+        *) [ -z "$REPO" ] || die "unexpected arg: $1"; REPO="$1" ;;
+    esac
+    shift
+done
+[ -n "$REPO" ] || die "usage: beads-onboard <repo> [--prefix PX] [--port N]"
+[ -d "$CENTRAL/.git" ] || die "central repo not found at $CENTRAL (set BEADS_CENTRAL)"
+[ -e "$CENTRAL/$REPO/.beads" ] && die "$REPO already onboarded ($CENTRAL/$REPO/.beads exists)"
+command -v "$BR" >/dev/null 2>&1 || die "real br binary '$BR' not on PATH"
+
+# Default prefix: first 3 alphanumerics of the repo name.
+if [ -z "$PREFIX" ]; then
+    PREFIX=$(printf '%s' "$REPO" | tr -cd 'A-Za-z0-9' | cut -c1-3 | tr 'A-Z' 'a-z')
+    [ -n "$PREFIX" ] || die "could not derive a prefix; pass --prefix"
+fi
+
+# Default port: one past the highest listen port across existing instance configs.
+if [ -z "$PORT" ]; then
+    max=7770
+    for f in "$CONFDIR"/*.toml; do
+        [ -f "$f" ] || continue
+        p=$(sed -n 's/.*listen *= *"[^:"]*:\([0-9][0-9]*\)".*/\1/p' "$f" | head -1)
+        if [ -n "$p" ] && [ "$p" -gt "$max" ] 2>/dev/null; then max="$p"; fi
+    done
+    PORT=$((max + 1))
+fi
+
+echo "onboarding '$REPO' — prefix=$PREFIX, port=$PORT, central=$CENTRAL"
+
+# 1. create the beads in the central repo + commit the tracked files.
+mkdir -p "$CENTRAL/$REPO"
+( cd "$CENTRAL/$REPO" && RUST_LOG=error "$BR" init --prefix "$PREFIX" >/dev/null )
+git -C "$CENTRAL" add "$REPO/.beads"
+git -C "$CENTRAL" -c user.name=sahuagin -c user.email=sahuagin@users.noreply.github.com \
+    commit -q -m "Onboard $REPO beads (prefix $PREFIX)"
+
+# 2. write the per-instance config (shared knobs come from config.toml).
+mkdir -p "$CONFDIR"
+cat > "$CONFDIR/$REPO.toml" <<EOF
+db = "$CENTRAL/$REPO/.beads/beads.db"
+listen = "0.0.0.0:$PORT"
+repo = "$CENTRAL"
+EOF
+
+USER_NAME=$(id -un)
+cat <<EOF
+
+Created:
+  $CENTRAL/$REPO/.beads   (committed; push handled by cron)
+  $CONFDIR/$REPO.toml
+
+Next — install + start the service (needs doas):
+
+  doas install -m 0555 $RCD /usr/local/etc/rc.d/beadsd_$REPO
+  doas sysrc beadsd_${REPO}_enable=YES beadsd_${REPO}_user=$USER_NAME
+  doas service beadsd_$REPO start
+
+Then make the route live (sprint + the br shim will use it):
+
+  echo '$REPO=http://localhost:$PORT/mcp' >> $REMOTES
+
+After that, in the '$REPO' working repo, plain \`br\` and \`sprint-start\` hit the
+central writer. The working repo needs NO local .beads — don't \`br init\` there.
+EOF
