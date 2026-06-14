@@ -50,9 +50,9 @@ first non-free rollback is flagged.
    cp ~/src/beadsd/config/agent_tools.example.toml   ~/.config/beadsd/agent_tools.toml
    # edit paths/ports if they differ from the defaults
    ```
-   `br_bin` in `config.toml` MUST be absolute: the rc.d-supervised daemon runs
-   with a minimal PATH that does not include `~/.local/bin`, so a bare `"br"`
-   fails with `br_spawn_failed: No such file or directory`.
+   `br_bin = "br"` resolves via PATH — the rc.d puts `~/.local/bin` on the
+   daemon's PATH. (Set an absolute `br_bin` only if running beadsd somewhere br
+   isn't on PATH.)
 6. Install the supervision script + per-project instances and enable them. The
    rc.d derives each instance's config from its name (`beadsd_mu` → `mu.toml`):
    ```sh

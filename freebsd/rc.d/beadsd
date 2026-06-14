@@ -49,9 +49,13 @@ eval "_config=\"\${${name}_config:-${_home}/.config/beadsd/${_instance}.toml}\""
 # must be set explicitly: env(1) does not carry it through.
 pidfile="/var/run/${name}/${name}.pid"
 
+# PATH must include ~/.local/bin so beadsd finds br (and friends): daemon(8)
+# does not inherit a login shell's PATH.
 command="/usr/sbin/daemon"
 command_args="-r -P ${pidfile} -o ${_log} \
-    /usr/bin/env HOME=${_home} RUST_LOG=${_rust_log} \
+    /usr/bin/env HOME=${_home} \
+    PATH=${_home}/.local/bin:/usr/local/bin:/usr/bin:/bin \
+    RUST_LOG=${_rust_log} \
     ${_command} --config ${_config}"
 
 start_precmd="beadsd_prestart"
