@@ -22,18 +22,18 @@ first non-free rollback is flagged.
 1. Build: `cd ~/src/beadsd && RUSTC_WRAPPER= cargo build --release`; install
    `target/release/{beadsd,beads}` to `~/.local/bin/`.
 2. Create `sahuagin/beads-central` (private recommended — agent_tools beads are
-   not in public_github). Clone to `~/src/beads-central/`.
+   not in public_github). Clone to `~/src/public_github/beads-central/`.
 3. **Plain-copy** (history not preserved) the live DBs into subdirs:
    ```sh
-   mkdir -p ~/src/beads-central/mu ~/src/beads-central/agent_tools
-   cp -r ~/src/public_github/mu/.beads        ~/src/beads-central/mu/.beads
-   cp -r ~/src/agent_tools/.beads             ~/src/beads-central/agent_tools/.beads
-   cd ~/src/beads-central && git init && git add -A && git commit -m "import mu + agent_tools beads"
+   mkdir -p ~/src/public_github/beads-central/mu ~/src/public_github/beads-central/agent_tools
+   cp -r ~/src/public_github/mu/.beads        ~/src/public_github/beads-central/mu/.beads
+   cp -r ~/src/agent_tools/.beads             ~/src/public_github/beads-central/agent_tools/.beads
+   cd ~/src/public_github/beads-central && git init && git add -A && git commit -m "import mu + agent_tools beads"
    ```
 4. Run a beadsd **in the foreground** against each subdir DB; smoke from the
    host and a second machine:
    ```sh
-   beadsd --db ~/src/beads-central/mu/.beads/beads.db --listen 0.0.0.0:7771 &
+   beadsd --db ~/src/public_github/beads-central/mu/.beads/beads.db --listen 0.0.0.0:7771 &
    BEADS_REMOTE=http://localhost:7771/mcp beads ready
    ```
    Verify prefixes (`mu-`, `at-`) intact and `br doctor --db <central>` clean.
@@ -159,7 +159,7 @@ subdir in the central checkout, add a `beadsd_<name>` rc.d instance + port + a
 
 ## Invariants / guardrails
 
-- **No human or stray `br` ever touches `~/src/beads-central`** — it is the
+- **No human or stray `br` ever touches `~/src/public_github/beads-central`** — it is the
   service's private working tree. That is now the *only* way to reintroduce
   divergence.
 - beadsd must be pinned to its `--db` and never allowed to cwd-walk into another
