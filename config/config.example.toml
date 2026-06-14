@@ -3,8 +3,9 @@
 #
 # Every field is optional; these are the built-in defaults shown explicitly.
 
-# Path to the br binary.
-br_bin = "br"
+# Path to the br binary. MUST be absolute for the rc.d-supervised service:
+# daemon(8) runs with a minimal PATH that does not include ~/.local/bin.
+br_bin = "/home/tcovert/.local/bin/br"
 
 # Debounced snapshot-commit interval in seconds (0 disables the committer).
 commit_interval_secs = 30
