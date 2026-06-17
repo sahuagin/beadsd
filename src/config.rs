@@ -44,6 +44,14 @@ pub struct Config {
     /// Identity used for snapshot commits (no PII; the central repo may be public).
     pub git_author_name: String,
     pub git_author_email: String,
+    /// Allowed inbound `Host` headers (rmcp `Host` validation). EMPTY = allow
+    /// any Host — the correct posture for a trusted-network bind like the
+    /// default "0.0.0.0:7772", which must accept LAN clients by IP/hostname.
+    /// Set to e.g. ["beadsd.host", "beadsd.host:7772"] to lock down a public
+    /// bind. (The rmcp default of localhost-only silently 403s every remote
+    /// client even when bound to 0.0.0.0 — that is the bug this field fixes.)
+    #[serde(default)]
+    pub allowed_hosts: Vec<String>,
 }
 
 impl Default for Config {
@@ -58,6 +66,7 @@ impl Default for Config {
             health_path: "/health".into(),
             git_author_name: "beadsd".into(),
             git_author_email: "beadsd@localhost".into(),
+            allowed_hosts: Vec::new(),
         }
     }
 }
