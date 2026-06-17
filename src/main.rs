@@ -627,12 +627,13 @@ async fn main() -> anyhow::Result<()> {
 
     let server = BeadsServer::new(cfg.br_bin.clone(), db_path);
 
+    // rmcp's default allowed_hosts is localhost-only, which 403s every remote
+    // client even on a 0.0.0.0 bind. beadsd is a trusted-network service, so
+    // honor cfg.allowed_hosts (empty = allow any Host; see config.rs).
+    let http_config =
+        StreamableHttpServerConfig::default().with_allowed_hosts(cfg.allowed_hosts.clone());
     let service: StreamableHttpService<BeadsServer, LocalSessionManager> =
-        StreamableHttpService::new(
-            move || Ok(server.clone()),
-            Default::default(),
-            StreamableHttpServerConfig::default(),
-        );
+        StreamableHttpService::new(move || Ok(server.clone()), Default::default(), http_config);
 
     let app = axum::Router::new()
         .route(&cfg.health_path, axum::routing::get(|| async { "ok" }))

@@ -22,3 +22,11 @@ git_author_email = "beadsd@localhost"
 
 # A default bind; per-instance configs set a concrete ip:port.
 listen = "0.0.0.0:7777"
+
+# Allowed inbound `Host` headers (rmcp validation). EMPTY (the default) allows
+# ANY Host — correct for a trusted-network bind, where remote clients connect by
+# the server's LAN IP/hostname. rmcp's own default is localhost-only, which
+# silently 403s every remote client even on a 0.0.0.0 bind; leaving this empty
+# avoids that. To lock down a public bind, list the allowed authorities:
+#   allowed_hosts = ["beads.example.com", "beads.example.com:7772"]
+allowed_hosts = []
