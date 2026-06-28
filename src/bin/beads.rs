@@ -4,13 +4,21 @@
 //! beadsd from any host on the trusted network, instead of running `br`
 //! against a (possibly divergent / cross-host-unsafe) local DB.
 //!
-//!   beads claim   <id> --actor <name>
-//!   beads unclaim <id> [--actor <name>]
-//!   beads close   <id> [--reason <r>] [--actor <name>]
-//!   beads ready   [--assignee <a>] [--unassigned] [--limit <n>]
-//!   beads show    <id>
-//!   beads create  <title> [--type <t>] [--priority <p>] [--description <d>] [--actor <a>]
-//!   beads update  <id> [--status <s>] [--assignee <a>] [--priority <p>] [--actor <a>]
+//! Explicit verbs (these are NOT plain `br` subcommands, so they stay typed):
+//!   beads claim   <id> --actor <name>   atomic claim; br has no `claim`
+//!   beads unclaim <id> [--actor <name>]  release; br has no `unclaim`
+//!   beads show    <id>                   always JSON (sprint-start/-end parse it)
+//!   beads exec -- <br args...>           explicit passthrough; the `br` shim uses it
+//!
+//! Any OTHER subcommand is forwarded verbatim to the central `br` via beadsd's
+//! br_exec, with stdout/stderr/exit replicated faithfully — so the full `br`
+//! surface works through `beads`:
+//!   beads list --status open -p 0-1 --json
+//!   beads count --by status        beads blocked        beads dep tree <id>
+//!   beads ready --json             beads graph <id>     beads search <q>
+//!   beads create "Title" --type task -p 1
+//!   beads update <id> --status in_progress --actor <a>
+//!   beads close  <id> --reason "done" --actor <a>
 //!
 //! --url defaults to $BEADS_REMOTE (e.g. http://host:7777/mcp).
 //!
@@ -40,67 +48,33 @@ struct Cli {
 #[derive(Subcommand, Debug)]
 enum Cmd {
     /// Atomically claim an issue (assignee=actor, status=in_progress).
+    /// br has no `claim`; beadsd translates it to `br update --claim`.
     Claim {
         id: String,
         #[arg(long)]
         actor: String,
     },
     /// Release a claim (clear assignee, status back to open).
+    /// br has no `unclaim`; beadsd translates it to `br update`.
     Unclaim {
         id: String,
         #[arg(long)]
         actor: Option<String>,
     },
-    /// Close an issue.
-    Close {
-        id: String,
-        #[arg(long)]
-        reason: Option<String>,
-        #[arg(long)]
-        actor: Option<String>,
-    },
-    /// List ready (open, unblocked, not deferred) issues.
-    Ready {
-        #[arg(long)]
-        assignee: Option<String>,
-        #[arg(long)]
-        unassigned: bool,
-        #[arg(long)]
-        limit: Option<u32>,
-    },
-    /// Show one issue.
+    /// Show one issue (always JSON — sprint-start/sprint-end parse it).
     Show { id: String },
-    /// Create a new issue.
-    Create {
-        title: String,
-        #[arg(long = "type")]
-        issue_type: Option<String>,
-        #[arg(long)]
-        priority: Option<String>,
-        #[arg(long)]
-        description: Option<String>,
-        #[arg(long)]
-        actor: Option<String>,
-    },
-    /// Update an issue (non-terminal).
-    Update {
-        id: String,
-        #[arg(long)]
-        status: Option<String>,
-        #[arg(long)]
-        assignee: Option<String>,
-        #[arg(long)]
-        priority: Option<String>,
-        #[arg(long)]
-        actor: Option<String>,
-    },
-    /// Run an arbitrary br subcommand against the central DB (the `br` shim
-    /// uses this). stdout/stderr/exit code are replicated faithfully.
-    /// Example: `beads --url <u> exec -- ready --json`.
+    /// Run an explicit br subcommand against the central DB. The `br` shim uses
+    /// this (`beads exec -- <args>`); stdout/stderr/exit replicated faithfully.
+    /// Equivalent to the bare-subcommand relay below, minus the `--`.
     Exec {
         #[arg(trailing_var_arg = true, allow_hyphen_values = true)]
         args: Vec<String>,
     },
+    /// Any other br subcommand (list, count, blocked, dep, graph, search,
+    /// ready, create, update, close, ...) forwarded verbatim to the central
+    /// br via beadsd, with stdout/stderr/exit replicated faithfully.
+    #[command(external_subcommand)]
+    External(Vec<String>),
 }
 
 /// Map the subcommand to a (tool_name, arguments) pair.
@@ -110,44 +84,9 @@ fn to_call(cmd: &Cmd) -> (&'static str, Value) {
         Cmd::Unclaim { id, actor } => {
             ("beads_unclaim", obj([("id", Some(json!(id))), ("actor", actor.as_ref().map(|a| json!(a)))]))
         }
-        Cmd::Close { id, reason, actor } => (
-            "beads_close",
-            obj([
-                ("id", Some(json!(id))),
-                ("reason", reason.as_ref().map(|r| json!(r))),
-                ("actor", actor.as_ref().map(|a| json!(a))),
-            ]),
-        ),
-        Cmd::Ready { assignee, unassigned, limit } => (
-            "beads_ready",
-            obj([
-                ("assignee", assignee.as_ref().map(|a| json!(a))),
-                ("unassigned", if *unassigned { Some(json!(true)) } else { None }),
-                ("limit", limit.map(|l| json!(l))),
-            ]),
-        ),
         Cmd::Show { id } => ("beads_show", json!({ "id": id })),
-        Cmd::Create { title, issue_type, priority, description, actor } => (
-            "beads_create",
-            obj([
-                ("title", Some(json!(title))),
-                ("issue_type", issue_type.as_ref().map(|v| json!(v))),
-                ("priority", priority.as_ref().map(|v| json!(v))),
-                ("description", description.as_ref().map(|v| json!(v))),
-                ("actor", actor.as_ref().map(|v| json!(v))),
-            ]),
-        ),
-        Cmd::Update { id, status, assignee, priority, actor } => (
-            "beads_update",
-            obj([
-                ("id", Some(json!(id))),
-                ("status", status.as_ref().map(|v| json!(v))),
-                ("assignee", assignee.as_ref().map(|v| json!(v))),
-                ("priority", priority.as_ref().map(|v| json!(v))),
-                ("actor", actor.as_ref().map(|v| json!(v))),
-            ]),
-        ),
-        Cmd::Exec { args } => ("br_exec", json!({ "args": args })),
+        // Explicit passthrough and the bare-subcommand relay both go to br_exec.
+        Cmd::Exec { args } | Cmd::External(args) => ("br_exec", json!({ "args": args })),
     }
 }
 
@@ -189,8 +128,9 @@ async fn main() -> anyhow::Result<()> {
         .find_map(|c| serde_json::to_value(c).ok()?.get("text")?.as_str().map(str::to_owned))
         .unwrap_or_default();
 
-    // exec passthrough: replicate br's stdout/stderr and exit code faithfully.
-    if matches!(cli.cmd, Cmd::Exec { .. }) {
+    // exec / bare-subcommand passthrough: replicate br's stdout/stderr and exit
+    // code faithfully.
+    if matches!(cli.cmd, Cmd::Exec { .. } | Cmd::External(..)) {
         use std::io::Write;
         if let Ok(Value::Object(o)) = serde_json::from_str::<Value>(&text) {
             if let Some(s) = o.get("stdout").and_then(Value::as_str) {
