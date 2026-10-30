@@ -53,12 +53,17 @@ first non-free rollback is flagged.
    `br_bin = "br"` resolves via PATH — the rc.d puts `~/.local/bin` on the
    daemon's PATH. (Set an absolute `br_bin` only if running beadsd somewhere br
    isn't on PATH.)
-6. Install the supervision script + per-project instances and enable them. The
-   rc.d derives each instance's config from its name (`beadsd_mu` → `mu.toml`):
+6. Install one rc.d script per project instance and enable them. The rc.d
+   derives each instance's config from its name (`beadsd_mu` → `mu.toml`).
+   `freebsd/rc.d/beadsd` is a template: `scripts/beadsd-rcd` renders a copy with
+   the instance's own `PROVIDE`, which rcorder reads from the file text (so no
+   symlinks):
    ```sh
-   doas install -m 0555 ~/src/beadsd/freebsd/rc.d/beadsd /usr/local/etc/rc.d/beadsd
-   doas ln -s /usr/local/etc/rc.d/beadsd /usr/local/etc/rc.d/beadsd_mu
-   doas ln -s /usr/local/etc/rc.d/beadsd /usr/local/etc/rc.d/beadsd_agent_tools
+   cd ~/src/beadsd
+   for i in mu agent_tools; do
+       scripts/beadsd-rcd $i > /tmp/beadsd_$i
+       doas install -m 0555 /tmp/beadsd_$i /usr/local/etc/rc.d/beadsd_$i
+   done
    # /etc/rc.conf — only enable + user per instance:
    #   beadsd_mu_enable="YES"
    #   beadsd_mu_user="tcovert"

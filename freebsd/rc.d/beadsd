@@ -6,10 +6,12 @@
 #
 # Single-writer beads service. ONE instance per project. rc.subr namespaces
 # every variable by the script's filename, so install this script once per
-# project under a distinct name (beadsd_mu, beadsd_at, …) — e.g. by symlink:
+# project under a distinct name (beadsd_mu, beadsd_at, …). This file is a
+# template: rcorder(8) reads PROVIDE from the file text, so a symlink can't give
+# an instance its own name. Render a copy per instance instead:
 #
-#   ln -s /usr/local/etc/rc.d/beadsd /usr/local/etc/rc.d/beadsd_mu
-#   ln -s /usr/local/etc/rc.d/beadsd /usr/local/etc/rc.d/beadsd_at
+#   scripts/beadsd-rcd mu > beadsd_mu
+#   doas install -m 0555 beadsd_mu /usr/local/etc/rc.d/beadsd_mu
 #
 # All per-instance settings (db, listen ip:port, repo) live in a TOML config:
 # by default ~<user>/.config/beadsd/<instance>.toml, where <instance> is the
@@ -24,7 +26,10 @@
 
 . /etc/rc.subr
 
-name=$(basename "$0")
+# At boot /etc/rc sources this file in a subshell, so $0 is /etc/rc there;
+# rc.subr's run_rc_script sets rc_service to the script's path first. `service`
+# and a direct run exec the file, where rc_service is unset and $0 is right.
+name=$(basename "${rc_service:-$0}")
 rcvar="${name}_enable"
 
 load_rc_config "$name"
