@@ -17,7 +17,7 @@ CENTRAL="${BEADS_CENTRAL:-$HOME/src/public_github/beads-central}"
 CONFDIR="${BEADS_CONFDIR:-$HOME/.config/beadsd}"
 REMOTES="${BEADS_REMOTES:-$HOME/.config/beads/remotes.env}"
 BR="${BEADS_BR_REAL:-br-real}"
-RCD="$HOME/src/beadsd/freebsd/rc.d/beadsd"
+RCD_RENDER="$(dirname -- "$(realpath -- "$0")")/beadsd-rcd"
 
 die() { echo "beads-onboard: $1" >&2; exit 1; }
 
@@ -36,6 +36,8 @@ done
 [ -d "$CENTRAL/.git" ] || die "central repo not found at $CENTRAL (set BEADS_CENTRAL)"
 [ -e "$CENTRAL/$REPO/.beads" ] && die "$REPO already onboarded ($CENTRAL/$REPO/.beads exists)"
 command -v "$BR" >/dev/null 2>&1 || die "real br binary '$BR' not on PATH"
+# Render once up front so a name rc.subr can't use fails before anything is created.
+"$RCD_RENDER" "$REPO" >/dev/null || die "cannot render the rc.d script for '$REPO'"
 
 # Default prefix: first 3 alphanumerics of the repo name.
 if [ -z "$PREFIX" ]; then
@@ -71,16 +73,21 @@ listen = "0.0.0.0:$PORT"
 repo = "$CENTRAL"
 EOF
 
+# 3. render this instance's rc.d script (its own PROVIDE) for the doas install below.
+mkdir -p "$CONFDIR/rc.d"
+"$RCD_RENDER" "$REPO" > "$CONFDIR/rc.d/beadsd_$REPO"
+
 USER_NAME=$(id -un)
 cat <<EOF
 
 Created:
   $CENTRAL/$REPO/.beads   (committed; push handled by cron)
   $CONFDIR/$REPO.toml
+  $CONFDIR/rc.d/beadsd_$REPO   (rc.d script rendered for this instance)
 
 Next — install + start the service (needs doas):
 
-  doas install -m 0555 $RCD /usr/local/etc/rc.d/beadsd_$REPO
+  doas install -m 0555 $CONFDIR/rc.d/beadsd_$REPO /usr/local/etc/rc.d/beadsd_$REPO
   doas sysrc beadsd_${REPO}_enable=YES beadsd_${REPO}_user=$USER_NAME
   doas service beadsd_$REPO start
 

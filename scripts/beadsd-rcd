@@ -1,0 +1,27 @@
+#!/bin/sh
+# beadsd-rcd <instance>
+#
+# Render the beadsd rc.d script for one instance to stdout, with its own
+# `PROVIDE: beadsd_<instance>`. rcorder(8) reads PROVIDE from the file text, so
+# each instance needs its own copy rather than a symlink to the template.
+#
+#   scripts/beadsd-rcd mu > beadsd_mu
+#   doas install -m 0555 beadsd_mu /usr/local/etc/rc.d/beadsd_mu
+set -eu
+
+die() { echo "beadsd-rcd: $1" >&2; exit 1; }
+
+[ $# -eq 1 ] || die "usage: beadsd-rcd <instance>"
+INSTANCE="$1"
+case "$INSTANCE" in
+    ''|*[!A-Za-z0-9_]*) die "instance must be [A-Za-z0-9_]+ (it becomes part of rc.conf variable names): '$INSTANCE'" ;;
+esac
+
+# The template lives in the repo next to this script; resolve symlinks so an
+# installed link in ~/.local/bin still finds it.
+here=$(dirname -- "$(realpath -- "$0")")
+TEMPLATE="${BEADSD_RCD_TEMPLATE:-$here/../freebsd/rc.d/beadsd}"
+[ -f "$TEMPLATE" ] || die "template not found: $TEMPLATE (set BEADSD_RCD_TEMPLATE)"
+grep -qx '# PROVIDE: beadsd' "$TEMPLATE" || die "no '# PROVIDE: beadsd' line in $TEMPLATE"
+
+sed "s/^# PROVIDE: beadsd\$/# PROVIDE: beadsd_$INSTANCE/" "$TEMPLATE"
